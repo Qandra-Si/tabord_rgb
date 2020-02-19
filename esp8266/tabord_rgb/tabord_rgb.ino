@@ -10,7 +10,7 @@
 
 
 // серийный номер изделия (он же номер игрока, которому он достался)
-#define HTTP_USER_AGENT    "TabordRGB/1.0 (esp8266)"
+#define HTTP_USER_AGENT    "TabordRGB/" TABORD_RGB_VER " (esp8266)"
 // max количество последовательно отображаемых итогов сражений
 #define MAX_KILLMAILS      10
 // пины подключения RGB через транзисторную сборку
