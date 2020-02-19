@@ -35,31 +35,45 @@ enum state_t
   sAP_MODE_FINISHED = FSM_STATE(0x0,0x0,0x0,1), // нет свечений, мерцающий (исключительная ситуация для перезагрузки)
 };
 
-const char * g_ssid = NULL;
-const char * g_pswd = NULL;
-const char * g_cfg_access_point = "tabord_rgb";
-byte g_eeprom_data[512];
-Ticker g_leds_control;
-volatile state_t g_fsm_active_state;
-volatile state_t g_fsm_prev_state;
-volatile bool g_setup_finished = false; // признак того, что работа метода setup завершена
-volatile bool g_need_reboot = false; // признак того, что требуется перезагрузка платы
-ESP8266WebServer g_web_server(80);
-unsigned short g_timeout_to_load_data = 0;
-unsigned int g_killmails[MAX_KILLMAILS];
-unsigned int g_killmails_stored = 0;
+// глобальные параметры
+const char       *g_cfg_access_point = "tabord_rgb";
+// данные из EEPROM
+byte              g_eeprom_data[512];
+const char       *g_ssid = NULL;
+const char       *g_pswd = NULL;
+// прерывания для управления светодиодами
+Ticker            g_leds_control;
+// машина состояний (finite state machine) для управления алгоритмом модуля и его индикацией
+volatile state_t  g_fsm_active_state;
+volatile state_t  g_fsm_prev_state;
+volatile bool     g_setup_finished = false; // признак того, что работа метода setup завершена
+volatile bool     g_need_reboot = false; // признак того, что требуется перезагрузка платы
+unsigned short    g_timeout_to_load_data = 0;
+// локальный вер-сервер для настройки содержимого EEPROM с помощью браузера
+// используется только в режиме локальной точки доступа (sAP_MODE_ACTIVE)
+ESP8266WebServer  g_web_server(80);
+// данные с результатами боевых действий (killmails) для отображения и индикации 
+unsigned int      g_killmails[MAX_KILLMAILS];
+unsigned int      g_killmails_stored = 0;
+unsigned int      g_killmails_current = 0;
 
+
+// ---------------------------
+// forward method declarations
 void readEEPROM();
 void parseEEPROM();
 void renewEEPROM(const char * ssid, const char * pswd);
+void handleWPSAPBtnPressed();
 bool startWPS();
-bool startSTA();
+bool startAP();
 void resetTabordFSM();
 void changeTabordState(state_t state, int line);
 void ledsControl();
 void handleWebRoot();
 void handleWebNotFound();
 void requestURI();
+// ---------------------------
+
 
 void setup()
 {
@@ -169,6 +183,51 @@ void renewEEPROM(const char * ssid, const char * pswd)
   }
 }
 
+void handleWPSAPBtnPressed()
+{
+  // если обнаруживаем, что кнопка WPS/AP нажата, то проверяем что она удерживается 2сек непрерывно
+  int cnt = 0;
+  do
+  {
+    delay(300);
+    if (!digitalRead(WPS_BUTTON_PIN)) break;
+    cnt++;
+    Serial.print(".");
+    if (cnt == 7) changeTabordState(sWPS_MODE_ACTIVE, __LINE__); // спустя 2.1 сек включем синюю подсветку режима WPS
+    else if (cnt == 15) changeTabordState(sAP_MODE_ACTIVE, __LINE__); // спустя 4.5 сек включем жёлтую подсветку режима STA
+  } while (cnt < 20);
+  if (cnt < 7)
+    Serial.println(" and aborted");
+  else if (cnt < 15)
+  {
+    Serial.println(" and WPS activated");
+    // бесконечно пытаемся найти точку доступа
+    while (1)
+    {
+      if (startWPS())
+      {
+        parseEEPROM();
+        if (g_ssid && g_pswd)
+        {
+          Serial.printf("WPS finished sucessfully. SSID '%s' and password '%s'\n", g_ssid, g_pswd);
+          break;
+        }
+      }
+    }
+  }
+  else // if (cnt >= 15)
+  {
+    Serial.println(" and AP activated");
+    if (!startAP())
+    {
+      // если не удалось настроить локальную точку доступа, то "программно перезагрузим плату",
+      // т.к. из-за подвисания loop контроллер перезапустится
+      g_need_reboot = true;
+    }
+    //перенесено из main:return;
+  }
+}
+
 // see https://github.com/esp8266/Arduino/issues/1958#issue-150097589
 bool startWPS()
 {
@@ -206,7 +265,7 @@ bool startWPS()
   return wpsSuccess; 
 }
 
-bool startSTA()
+bool startAP()
 {
   changeTabordState(sAP_MODE_ACTIVE, __LINE__);
   Serial.printf("Configuring open access point SSID '%s' ... ", g_cfg_access_point);
@@ -401,47 +460,8 @@ void loop()
   if (digitalRead(WPS_BUTTON_PIN))
   {
     Serial.print("Configure button pressed...");
-    // если обнаруживаем, что кнопка WPS/STA нажата, то проверяем что она удерживается 2сек непрерывно
-    int cnt = 0;
-    do
-    {
-      delay(300);
-      if (!digitalRead(WPS_BUTTON_PIN)) break;
-      cnt++;
-      Serial.print(".");
-      if (cnt == 7) changeTabordState(sWPS_MODE_ACTIVE, __LINE__); // спустя 2.1 сек включем синюю подсветку режима WPS
-      else if (cnt == 15) changeTabordState(sAP_MODE_ACTIVE, __LINE__); // спустя 4.5 сек включем жёлтую подсветку режима STA
-    } while (cnt < 20);
-    if (cnt < 7)
-      Serial.println(" and aborted");
-    else if (cnt < 15)
-    {
-      Serial.println(" and WPS activated");
-      // бесконечно пытаемся найти точку доступа
-      while (1)
-      {
-        if (startWPS())
-        {
-          parseEEPROM();
-          if (g_ssid && g_pswd)
-          {
-            Serial.printf("WPS finished sucessfully. SSID '%s' and password '%s'\n", g_ssid, g_pswd);
-            break;
-          }
-        }
-      }
-    }
-    else // if (cnt >= 15)
-    {
-      Serial.println(" and STA activated");
-      if (!startSTA())
-      {
-        // если не удалось настроить локальную точку доступа, то "программно перезагрузим плату",
-        // т.к. из-за подвисания loop контроллер перезапустится
-        g_need_reboot = true;
-      }
-      return;
-    }
+    handleWPSAPBtnPressed();
+    return;
   }
 
   // пока нет подключения к wifi (или оно внезапно утрачено) отображаем состояние "нет подключения"
