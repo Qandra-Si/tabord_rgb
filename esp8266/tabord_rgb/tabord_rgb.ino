@@ -11,8 +11,19 @@
 
 // серийный номер изделия (он же номер игрока, которому он достался)
 #define HTTP_USER_AGENT    "TabordRGB/" TABORD_RGB_VER " (esp8266)"
+
+// ВНИМАНИЕ! СЛЕДУЮЩИЕ ЗНАЧЕНИЯ ДОЛЖНЫ БЫТЬ ЦЕЛЫМИ ЧИСЛАМИ И ДЕЛИТЬСЯ БЕЗ ОСТАТКОВ !!!!!
 // max количество последовательно отображаемых итогов сражений
 #define MAX_KILLMAILS      10
+// интервал (сек) обращения на web-сервер за обновлениями killmails
+#define UPLOAD_INTERVAL    60
+// интервал (ms) fading-цикла для одного из killmail-а (является частным от UPLOAD_INTERVAL/MAX_KILLMAILS)
+#define FADING_INTERVAL    6000
+// интервал смены частоты ШИМ на выходе транзисторной сборки (не слишком большой и не слишком маленький)
+#define PWM_INTERVAL       50
+// число нарастаний и затуханий свечения индикаторов за один fading-цикл (является частным от FADING_INTERVAL/PWM_INTERVAL)
+#define PWM_FADE_TIMES     120
+#define PWM_FADE_HALFTIMES (PWM_FADE_TIMES / 2)
 
 // аппаратно-зависимые настройки (свободные ноги, ёмкость eeprom и т.п.)
 // пины подключения RGB через транзисторную сборку
@@ -60,6 +71,7 @@ ESP8266WebServer  g_web_server(80);
 unsigned int      g_killmails[MAX_KILLMAILS];
 unsigned int      g_killmails_stored = 0;
 unsigned int      g_killmails_current = 0;
+unsigned int      g_killmails_fading = 0;
 
 
 // ---------------------------
@@ -93,7 +105,7 @@ void setup()
 
   // настройка машины состояний для сигнализации процесса настройки и работы
   resetTabordFSM();
-  g_leds_control.attach_ms(50, ledsControl);
+  g_leds_control.attach_ms(PWM_INTERVAL, ledsControl); // 50ms => 120 раз в 6 сек меняется частота ШИМ, т.о. fading-цикл состоит из 60 шагов нарастания и 60 шагов затухания
   // настройка прочих необходимых ресурсов
   pinMode(LED_BUILTIN, OUTPUT);
   // настройка работы с EEPROM
@@ -324,6 +336,10 @@ void changeTabordState(state_t state, int line)
 
 void ledsControl()
 {
+  // переходы по машине состояний - это системные воздействия (нажатия на тактовые кнопки,
+  // сбросы устройства, его перезагрузки, потеря Wi-Fi сигнала и соединения с интернетом)
+  // переход в состемное (технологическое) состояние происходит мгновенно, без ожидания
+  // когда завершится fading-цикл
   if (g_fsm_prev_state != g_fsm_active_state)
   {
     // требуется произвести замену цвета
@@ -332,6 +348,81 @@ void ledsControl()
     analogWrite(LED_BLUE_PIN, FSM_STATE_BLUE(g_fsm_active_state));
     g_fsm_prev_state = g_fsm_active_state;
     //Serial.printf("debug 4: %02x %02x %02x\n", (int)FSM_STATE_RED(g_fsm_active_state), (int)FSM_STATE_GREEN(g_fsm_active_state), (int)FSM_STATE_BLUE(g_fsm_active_state));
+    g_killmails_fading = 0;
+    g_killmails_current = 0;
+    return;
+  }
+
+  // если СИСТЕМНЫЕ состояния не меняются, и модуль находится в режиме sWIFI_ACTIVE, то это
+  // означает что он находится в "боевом" состоянии и готов к отображению результатов боёв
+  // ...осталось только дождаться когда они подгрузятся
+  if (sWIFI_ACTIVE == g_fsm_active_state)
+  {
+    if (g_killmails_stored == 0) return;
+    // всякая смена цвета выполняется только когда завершён fading-цикл
+    // метод вызывается каждые 50ms, таким образом 120 раз в 6 сек меняется частота ШИМ,
+    // т.о. fading-цикл состоит из 60 шагов нарастания и 60 шагов затухания
+    g_killmails_fading++;
+    if (g_killmails_fading == 1) // первый шаг fading-цикла
+    {
+      // поправка (с сервера внезапно пришло меньше данных, чем приходило ранее? ...раки!)
+      if (g_killmails_current > g_killmails_stored) g_killmails_current = 0;
+      // вычисляем цветовую составляющую
+      const unsigned int rgb = g_killmails[g_killmails_current];
+      const unsigned char r = (unsigned char)((rgb & 0x00ff0000) >> 16);
+      const unsigned char g = (unsigned char)((rgb & 0x0000ff00) >> 8);
+      const unsigned char b = (unsigned char)rgb;
+      // расчёт текущей мощности сечения
+      const float power = (float)1.0 / (float)PWM_FADE_HALFTIMES;
+      // некоторые индикаторы будут отключены на весь fading-цикл, если их цвета = 0
+      if (r == 0) digitalWrite(LED_RED_PIN, LOW);
+      else        analogWrite(LED_RED_PIN, power * r);
+      if (g == 0) digitalWrite(LED_GREEN_PIN, LOW);
+      else        analogWrite(LED_GREEN_PIN, power * g);
+      if (b == 0) digitalWrite(LED_BLUE_PIN, LOW);
+      else        analogWrite(LED_BLUE_PIN, power * b);
+    }
+    else if (g_killmails_fading == PWM_FADE_TIMES) // последний шаг fading-цикла
+    {
+      // выкл. всех каналов
+      digitalWrite(LED_RED_PIN, LOW);
+      digitalWrite(LED_GREEN_PIN, LOW);
+      digitalWrite(LED_BLUE_PIN, LOW);
+      // поправка (с сервера внезапно пришло 0 данных, хотя раньше было не 0? ...раки!)
+      if (g_killmails_stored == 0)
+        g_killmails_current = 0;
+      // переход к следующему killmail-у
+      else
+        g_killmails_current = (g_killmails_current + 1) % g_killmails_stored;
+      // перезапуск fading-цикла
+      g_killmails_fading = 0;
+    }
+    else
+    {
+      // вычисляем цветовую составляющую
+      const unsigned int rgb = g_killmails[g_killmails_current];
+      const unsigned char r = (unsigned char)((rgb & 0x00ff0000) >> 16);
+      const unsigned char g = (unsigned char)((rgb & 0x0000ff00) >> 8);
+      const unsigned char b = (unsigned char)rgb;
+      if (g_killmails_fading <= PWM_FADE_HALFTIMES) // значения от 2 до 60 включительно
+      {
+        // расчёт текущей мощности сечения (значения от 0.0333 до 1.0)
+        const float power = (float)g_killmails_fading / (float)(PWM_FADE_HALFTIMES);
+        // некоторые индикаторы будут отключены на весь fading-цикл, если их цвета = 0
+        if (r) analogWrite(LED_RED_PIN, power * r);
+        if (g) analogWrite(LED_GREEN_PIN, power * g);
+        if (b) analogWrite(LED_BLUE_PIN, power * b);
+      }
+      else if (g_killmails_fading < PWM_FADE_TIMES) // значения от 61 до 119 включительно
+      {
+        // инверсия текущей мощности сечения (раньше нарастало, теперь будет затухать, значения от 0.9833 до 0.0333)
+        const float power = (float)(PWM_FADE_TIMES - g_killmails_fading) / (float)(PWM_FADE_HALFTIMES);
+        // некоторые индикаторы будут отключены на весь fading-цикл, если их цвета = 0
+        if (r) analogWrite(LED_RED_PIN, power * r);
+        if (g) analogWrite(LED_GREEN_PIN, power * g);
+        if (b) analogWrite(LED_BLUE_PIN, power * b);
+      }
+    }
   }
 }
 
