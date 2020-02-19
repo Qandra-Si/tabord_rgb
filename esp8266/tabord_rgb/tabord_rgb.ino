@@ -13,11 +13,15 @@
 #define HTTP_USER_AGENT    "TabordRGB/" TABORD_RGB_VER " (esp8266)"
 // max количество последовательно отображаемых итогов сражений
 #define MAX_KILLMAILS      10
+
+// аппаратно-зависимые настройки (свободные ноги, ёмкость eeprom и т.п.)
 // пины подключения RGB через транзисторную сборку
+#define EEPROM_SIZE       512
 #define LED_BLUE_PIN       14
 #define LED_GREEN_PIN      12
 #define LED_RED_PIN        13
 #define WPS_BUTTON_PIN      4 // на самом деле у Troyka Wifi модуля шелкография помечена 5й ногой (до ревизии №8 включительно)
+
 // макрос для кодирования состояний машины состояний
 // r,g,b - соответветственно цвета со значениями от 0x0 до 0xf
 // f     - признак мерцания, 0 или 1
@@ -25,7 +29,7 @@
 #define FSM_STATE_RED(s)     (unsigned char)(((s&0xf00)>>4)*17)
 #define FSM_STATE_GREEN(s)   (unsigned char)((s&0x0f0)*17)
 #define FSM_STATE_BLUE(s)    (unsigned char)(((s&0x00f)<<4)*17)
-
+// состояния модуля
 enum state_t
 {
   sWIFI_INACTIVE    = FSM_STATE(0xf,0xf,0xf,0), // белый, НЕ мерцающий
@@ -38,7 +42,7 @@ enum state_t
 // глобальные параметры
 const char       *g_cfg_access_point = "tabord_rgb";
 // данные из EEPROM
-byte              g_eeprom_data[512];
+byte              g_eeprom_data[EEPROM_SIZE];
 const char       *g_ssid = NULL;
 const char       *g_pswd = NULL;
 // прерывания для управления светодиодами
@@ -63,6 +67,7 @@ unsigned int      g_killmails_current = 0;
 void readEEPROM();
 void parseEEPROM();
 void renewEEPROM(const char * ssid, const char * pswd);
+void clearEEPROM();
 void handleWPSAPBtnPressed();
 bool startWPS();
 bool startAP();
@@ -71,6 +76,8 @@ void changeTabordState(state_t state, int line);
 void ledsControl();
 void handleWebRoot();
 void handleWebNotFound();
+void handleWebCommit();
+void handleWebReset();
 void requestURI();
 // ---------------------------
 
@@ -90,7 +97,7 @@ void setup()
   // настройка прочих необходимых ресурсов
   pinMode(LED_BUILTIN, OUTPUT);
   // настройка работы с EEPROM
-  EEPROM.begin(512);
+  EEPROM.begin(EEPROM_SIZE);
 
   digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on (Note that LOW is the voltage level)
                                     // but actually the LED is on; this is because
@@ -123,7 +130,7 @@ void setup()
 
 void readEEPROM()
 {
-  for (int i = 0; i < 512; ++i)
+  for (int i = 0; i < EEPROM_SIZE; ++i)
     g_eeprom_data[i] = EEPROM.read(i);
 }
 
@@ -181,6 +188,16 @@ void renewEEPROM(const char * ssid, const char * pswd)
     else
       Serial.println("ERROR! EEPROM commit failed");
   }
+}
+
+void clearEEPROM()
+{
+  for (int i = 0; i < EEPROM_SIZE; ++i)
+    EEPROM.write(i, 0);
+  if (EEPROM.commit())
+    Serial.println("EEPROM successfully reset");
+  else
+    Serial.println("ERROR! EEPROM reset failed");
 }
 
 void handleWPSAPBtnPressed()
@@ -281,6 +298,7 @@ bool startAP()
 
   g_web_server.on("/", handleWebRoot);
   g_web_server.on("/commit", handleWebCommit);
+  g_web_server.on("/reset", handleWebReset);
   g_web_server.onNotFound(handleWebNotFound);
   g_web_server.begin();
   Serial.println("HTTP server started");
@@ -321,10 +339,14 @@ void handleWebRoot()
 {
   g_web_server.send(200, "text/html",
   "<h1>Tabord RGB configure</h1>"
-  "<form name='wifi' method='post' action='commit'>"
+  "<form name='auth' method='post' action='commit'>"
     "<p>SSID : <input type='text' size='31' name='ssid'></p>"
     "<p>Password : <input type='text' size='63' name='pwd'></p>"
     "<input type='submit' value='Commit'>"
+  "</form>\n"
+  "<form name='rst' method='post' action='reset'>"
+    "<p>Clear data from device.</p>"
+    "<input type='submit' value='Erase'>"
   "</form>"
   );
 }
@@ -377,6 +399,15 @@ void handleWebCommit()
   {
     handleWebNotFound();
   }
+}
+
+void handleWebReset()
+{
+  Serial.println("AP finished. Resetting EEPROM");
+  clearEEPROM();
+  WiFi.mode(WIFI_STA);
+  changeTabordState(sAP_MODE_FINISHED, __LINE__);
+  g_need_reboot = true;
 }
 
 void requestURI()
