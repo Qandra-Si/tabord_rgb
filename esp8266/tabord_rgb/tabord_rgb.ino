@@ -1,12 +1,17 @@
+// технические сведения о Wi-Fi модуле см. здесь: https://amperka.ru/product/troyka-wi-fi
+
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 #include <Ticker.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 
+#include "options.h"
+
+
 // серийный номер изделия (он же номер игрока, которому он достался)
-#define SERIAL_NUM         "90763727"
 #define HTTP_USER_AGENT    "TabordRGB/1.0 (esp8266)"
+// max количество последовательно отображаемых итогов сражений
 #define MAX_KILLMAILS      10
 // пины подключения RGB через транзисторную сборку
 #define LED_BLUE_PIN       14
@@ -321,7 +326,7 @@ void requestURI()
   HTTPClient http;
   http.setUserAgent(HTTP_USER_AGENT);
   http.setReuse(false);
-  if (http.begin(client, "http://gf-company.space/tabord_rgb/" SERIAL_NUM ".txt"))
+  if (http.begin(client, KILLMAILS_URL))
   {
     //debug:Serial.print("[HTTP] GET...\n");
     // если ошибка, то http-код будет отрицательный

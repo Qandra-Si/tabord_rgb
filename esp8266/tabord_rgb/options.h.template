@@ -1,0 +1,15 @@
+// DO NOT EDIT !!!!!!!!!!
+// для продолжения сборки проекта следует скопировать этот файл в options.h и ввести правильные значения ниже
+
+#ifndef __options_h
+#define __options_h
+
+
+// серийный номер изделия (он же номер игрока, которому он достался)
+// см. идентификатор персонажа https://zkillboard.com/character/2116129465/
+#define SERIAL_NUM         "2116129465"
+// url-адрес документа на сервере, в котором формируются итоги боевых действий с zKillboard
+// здесь следует ввести адрс своего web-сервера, где крутятся python-скрипты
+#define KILLMAILS_URL      "http://www.google.com/?q=" SERIAL_NUM " site:evewho.com"
+
+#endif
