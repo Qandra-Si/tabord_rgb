@@ -49,6 +49,7 @@ def getJson(type,suburl):
     time.sleep(2) # Do not hammer the server with API requests. Be polite.
     return json_data
 
+# см. https://github.com/zKillboard/zKillboard/wiki/API-(Killmails)
 last_hour_utc = datetime.utcnow().strftime("%Y%m%d%H00")
 alliance_kills = getJson(1,'allianceID/{alliance}/startTime/{time}/kills'.format(alliance=g_alliance_id,time=last_hour_utc))
 alliance_looses = getJson(1,'allianceID/{alliance}/startTime/{time}/losses'.format(alliance=g_alliance_id,time=last_hour_utc))
