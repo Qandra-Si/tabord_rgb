@@ -8,7 +8,7 @@
 
 ## Настройка и использование
 
-[![GF Company eveonline](https://img.youtube.com/vi/eDd7JO-nej4/0.jpg)](https://www.youtube.com/watch?v=eDd7JO-nej4 "Tabord RGB (настройка)")
+[![GF Company eveonline](https://img.youtube.com/vi/XQbjxhyhnCg/0.jpg)](https://www.youtube.com/watch?v=eDd7JO-nej4 "Tabord RGB (настройка)")
 
 Настройка устройства показана в видеоролике, см. выше.
 
