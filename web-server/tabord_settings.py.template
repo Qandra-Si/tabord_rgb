@@ -1,0 +1,6 @@
+g_eveserver = 'tranquility' # eveonline' server
+g_user_agent = 'http://your-server(dot)com/ Maintainer: Your Name your@email.com' # for example : Qandra Si qandra.si@gmail.com
+g_directory = '/full/path/to/generated/files' # for example : /var/www/tabord_rgb
+g_alliance_id = 99008697 # eveonline' alliance
+g_character_id = 90763727 # eveonline' character (device serial number)
+
