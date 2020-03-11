@@ -5,7 +5,7 @@
 #define __options_h
 
 // версия изделия
-#define TABORD_RGB_VER     "1.1"
+#define TABORD_RGB_VER     "2.0"
 // серийный номер изделия (он же номер игрока, которому он достался)
 // см. идентификатор персонажа https://zkillboard.com/character/2116129465/
 #define SERIAL_NUM         "2116129465"

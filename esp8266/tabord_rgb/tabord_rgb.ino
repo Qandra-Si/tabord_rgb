@@ -5,6 +5,8 @@
 #include <Ticker.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
+#include <NTPClient.h> // Look NTPClient by Fabrice Weinberg (Sketch > Include Library > Manage Libraries...)
+#include <WiFiUdp.h> // for esp8266
 
 #include "options.h"
 
@@ -47,6 +49,8 @@ enum state_t
   sWPS_MODE_ACTIVE  = FSM_STATE(0x0,0x0,0xf,0), // синий, НЕ мерцающий
   sAP_MODE_ACTIVE   = FSM_STATE(0xf,0xe,0x0,1), // жёлтый, мерцающий
   sWIFI_ACTIVE      = FSM_STATE(0x0,0xf,0x0,0), // зелёный, НЕ мерцающий
+  sWAITING_NTP      = FSM_STATE(0x2,0xe,0x4,0), // оливково-зелёный, НЕ мерцающий (не требуется иной подсветки относительно sWIFI_ACTIVE, но нужен другой числовой fsm-код)
+  sINET_AVAILABLE   = FSM_STATE(0x0,0xe,0x0,0), // зелёный, НЕ мерцающий (не требуется иной подсветки относительно sWIFI_ACTIVE, но нужен другой числовой fsm-код)
   sAP_MODE_FINISHED = FSM_STATE(0x0,0x0,0x0,1), // нет свечений, мерцающий (исключительная ситуация для перезагрузки)
 };
 
@@ -63,6 +67,7 @@ volatile state_t  g_fsm_active_state;
 volatile state_t  g_fsm_prev_state;
 volatile bool     g_setup_finished = false; // признак того, что работа метода setup завершена
 volatile bool     g_need_reboot = false; // признак того, что требуется перезагрузка платы
+volatile bool     g_ntp_client_started = false; // признак того, что ntp-клиент запущен
 unsigned short    g_timeout_to_load_data = 0;
 // локальный вер-сервер для настройки содержимого EEPROM с помощью браузера
 // используется только в режиме локальной точки доступа (sAP_MODE_ACTIVE)
@@ -72,6 +77,11 @@ unsigned int      g_killmails[MAX_KILLMAILS];
 unsigned int      g_killmails_stored = 0;
 unsigned int      g_killmails_current = 0;
 unsigned int      g_killmails_fading = 0;
+// ntp-клиент, который получает текущую дату-время, необходимую для формирования запросов
+// непосредственно на zkillboard, где 0 - это смещение в секундах относительно UTC (т.е. Eve Time)
+WiFiUDP           g_ntp_udp;
+NTPClient         g_time_client(g_ntp_udp, "pool.ntp.org", 0);
+unsigned int      g_time_client_step;
 
 
 // ---------------------------
@@ -353,10 +363,10 @@ void ledsControl()
     return;
   }
 
-  // если СИСТЕМНЫЕ состояния не меняются, и модуль находится в режиме sWIFI_ACTIVE, то это
+  // если СИСТЕМНЫЕ состояния не меняются, и модуль находится в режиме sINET_AVAILABLE, то это
   // означает что он находится в "боевом" состоянии и готов к отображению результатов боёв
   // ...осталось только дождаться когда они подгрузятся
-  if (sWIFI_ACTIVE == g_fsm_active_state)
+  if (sINET_AVAILABLE == g_fsm_active_state)
   {
     if (g_killmails_stored == 0) return;
     // всякая смена цвета выполняется только когда завершён fading-цикл
@@ -591,6 +601,12 @@ void loop()
   {
     if (g_fsm_active_state != sWIFI_INACTIVE)
       changeTabordState(sWIFI_INACTIVE, __LINE__); // будет включена сигнализация "нет соединения"
+    if (g_ntp_client_started)
+    {
+      g_time_client.end();
+      g_ntp_client_started = false;
+      g_time_client_step = 0;
+    }
     delay(500);
     return;
   }
@@ -600,10 +616,43 @@ void loop()
     Serial.print("WiFi connected, ip address: ");
     Serial.println(WiFi.localIP());
   }
+  if (g_fsm_active_state == sWIFI_ACTIVE)
+  {
+    changeTabordState(sWAITING_NTP, __LINE__); // будет включена сигнализация "ожидание данных от ntp-сервера"
+    if (!g_ntp_client_started)
+    {
+      g_time_client.begin();
+      g_ntp_client_started = true;
+      g_time_client_step = 0;
+    }
+  }
+  if (g_fsm_active_state == sWAITING_NTP)
+  {
+    if (!g_time_client.forceUpdate())
+    {
+      delay(500);
+      return;
+    }
+    Serial.println("Network time received, ET: " + g_time_client.getFormattedTime());
+    changeTabordState(sINET_AVAILABLE, __LINE__); // будет включена сигнализация "есть подключение к internet-у"
+  }
 
   // мигающий встроенный светодиод вкупе с зелёным индикатором состояния сигнализирует о том, что система работает
   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   delay(1000);
+
+  // обновление текущей даты времени (если успешно выполнено, то был получен ответ на запрос)
+  // запросы к ntp-серверам отправляются не чаще раз в 10 мин, в промежутках время считается арифметичеcки
+  g_time_client_step = g_time_client_step + 1;
+  if (g_time_client_step >= 600)
+  {
+    g_time_client_step = 0;
+    if (g_time_client.update())
+    {
+      // подъехало новое время от ntp-сервера
+      Serial.println("Network time updated, ET: " + g_time_client.getFormattedTime());
+    }
+  }
 
   // раз в минуту пытаемся получить доступ к web-серверу с информацией
   if (0 == g_timeout_to_load_data++)
