@@ -1,6 +1,11 @@
+#
+# copy this file to the tabord_settings.py file and edit a copy of this file
+#
+
 g_eveserver = 'tranquility' # eveonline' server
-g_user_agent = 'http://your-server(dot)com/ Maintainer: Your Name your@email.com' # for example : Qandra Si qandra.si@gmail.com
-g_directory = '/full/path/to/generated/files' # for example : /var/www/tabord_rgb
+#please specify:g_maintainer = 'Your Name your@email.com' # for example : Qandra Si qandra.si@gmail.com
+#please specify:g_user_agent = 'http://your-server(dot)com/ Maintainer: {maintainer}'.format(maintainer=g_maintainer) 
+#please specify:g_directory = '/full/path/to/generated/files' # for example : /var/www/tabord_rgb
 g_alliance_id = 99008697 # eveonline' alliance
 g_character_id = 90763727 # eveonline' character (device serial number)
 
