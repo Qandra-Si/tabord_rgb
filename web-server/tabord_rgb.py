@@ -31,7 +31,7 @@ def getJson(type,suburl):
     else:
         url = 'https://zkillboard.com/api/{api}/'.format(api=suburl)
         #req.addheaders = [('Content-Type', 'application/json')]
-        #headers=[{'Content-Type': 'application/json'},{'Accept-Encoding': 'gzip'},{'Maintainer': 'Alexander qandra.si@gmail.com'}]
+        #headers=[{'Content-Type': 'application/json'},{'Accept-Encoding': 'gzip'},{'Maintainer': g_maintainer}]
     if g_debug:
         print(url)
         sys.stdout.flush()
