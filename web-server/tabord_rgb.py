@@ -42,6 +42,10 @@ def getJson(type,suburl):
         req.add_header('Accept-Encoding', 'gzip')
         req.add_header('User-Agent', g_user_agent)
     f = urllib2.urlopen(req)
+    if g_debug:
+        print(req.header_items())
+        print('---')
+        print(f.info())
     if f.info().get('Content-Encoding') == 'gzip':
         buffer = StringIO(f.read())
         deflatedContent = gzip.GzipFile(fileobj=buffer)
